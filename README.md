@@ -138,7 +138,7 @@ OMP_NUM_THREADS=4 mpirun -np 4 ./solve_mpi_openmp.o 256 256 1e-8
 ```
 
 IBM Polus:
-```Hybrid_job.lsf:
+```
 Hybrid_job.lsf:
 #BSUB -n 2
 #BSUB -W 00:15
