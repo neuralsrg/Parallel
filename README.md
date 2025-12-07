@@ -57,7 +57,7 @@ g++-15 -fopenmp solve_openmp.cpp -o solve_openmp.o
 
 IBM Polus:
 ```
-xlC_r -qsmp=omp -std=c++14 -O0 -v -o solve_sequential solve_sequential.cpp 2>&1 | tee build.log
+xlC_r -qsmp=omp -std=c++14 -O0 -v -o solve_openmp solve_openmp.cpp 2>&1 | tee build.log
 ```
 
 
