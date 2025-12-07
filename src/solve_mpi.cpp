@@ -413,6 +413,8 @@ int main(int argc, char** argv)
         }
     }
 
+    double t_init_0 = MPI_Wtime();
+
     for (int j = 1; j <= ny; ++j)
         for (int i = 1; i <= nx; ++i) {
             w.at(i, j) = 0.0;
@@ -473,6 +475,11 @@ int main(int argc, char** argv)
     int maxit = Ni * Nj;
 
     double zr_prev_glob = rz;
+
+    double t_init = MPI_Wtime() - t0;
+
+    double t_loop_0 = MPI_Wtime();
+
     while (it < maxit) {
         for (int j = 1; j <= ny; ++j)
             for (int i = 1; i <= nx; ++i)
@@ -575,6 +582,8 @@ int main(int argc, char** argv)
         ++it;
     }
 
+    double t_loop = MPI_Wtime() - t_loop_0;
+
     double t1 = MPI_Wtime();
     double loc = t1 - t0, glob = 0.0;
     MPI_Reduce(&loc, &glob, 1, MPI_DOUBLE, MPI_MAX, 0, comm);
@@ -583,7 +592,9 @@ int main(int argc, char** argv)
         cerr << "MPI: iters=" << it << " restarts=" << restarts
              << " delta_step=" << delta_step << " Px=" << Px << " Py=" << Py
              << " size=" << size << "\n"
-             << "Total time = " << glob << " s\n";
+             << "Total time = " << glob << " s\n"
+             << "Init time: " << t_init << " s\n"
+             << "Loop time: " << t_loop << " s\n";
     }
 
     // const char *fname = "../logs/solution.csv";
