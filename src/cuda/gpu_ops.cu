@@ -12,6 +12,8 @@
 
 
 static const int BLOCK_SZ = 256;
+static const int BLOCK_X_2D = 16;
+static const int BLOCK_Y_2D = 16;
 
 __global__ void pack_edges_kernel(
 	const double* __restrict__ v,
@@ -50,23 +52,54 @@ __global__ void op_A_kernel(
 	int ny
 )
 {
-	int tid = blockDim.x * blockIdx.x + threadIdx.x;
-	int n = nx * ny;
-	if (tid >= n)
+	int j0 = blockIdx.x * blockDim.x + threadIdx.x;
+	int i0 = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (i0 >= nx || j0 >= ny)
 		return;
 
-	int i0 = tid / ny, j0 = tid % ny;
-	int i = i0 + 1, j = j0 + 1;
+	int tid = i0 * ny + j0;
 
 	double wij = w[tid];
-	double awij = aw[tid], aeij = ae[tid], bsij = bs[tid], bnij = bn[tid], dij = diag[tid];
+	double awij = aw[tid];
+	double aeij = ae[tid];
+	double bsij = bs[tid];
+	double bnij = bn[tid];
+	double dij = diag[tid];
 
-	double wi1j = (i + 1 <= nx) ? w[i * ny + (j - 1)] : fromR[j - 1];
-	double wi_1j = (i - 1 >= 1) ? w[(i - 2) * ny + (j - 1)] : fromL[j - 1];
-	double wij1 = (j + 1 <= ny) ? w[(i - 1) * ny + j] : fromT[i - 1];
-	double wij_1 = (j - 1 >= 1 ) ? w[(i - 1) * ny + (j - 2)] : fromB[i - 1];
+	double wi1j;
+	if (i0 + 1 < nx) {
+		wi1j = w[(i0 + 1) * ny + j0];
+	} else {
+		wi1j = fromR[j0];
+	}
 
-	Aw[tid] = dij*wij - aeij*wi1j - awij*wi_1j - bnij*wij1 - bsij*wij_1;
+	double wi_1j;
+	if (i0 > 0) {
+		wi_1j = w[(i0 - 1) * ny + j0];
+	} else {
+		wi_1j = fromL[j0];
+	}
+
+	double wij1;
+	if (j0 + 1 < ny) {
+		wij1 = w[i0 * ny + (j0 + 1)];
+	} else {
+		wij1 = fromT[i0];
+	}
+
+	double wij_1;
+	if (j0 > 0) {
+		wij_1 = w[i0 * ny + (j0 - 1)];
+	} else {
+		wij_1 = fromB[i0];
+	}
+
+	Aw[tid] = dij * wij
+		- aeij * wi1j
+		- awij * wi_1j
+		- bnij * wij1
+		- bsij * wij_1;
 }
 
 __global__ void params_wr_kernel(
@@ -186,10 +219,18 @@ void apply_A(
 	int ny
 )
 {
-	int n = nx * ny;
-	int blocks = (n + BLOCK_SZ - 1) / BLOCK_SZ;
-	op_A_kernel<<<blocks, BLOCK_SZ>>>(d_in, d_out, d_aw, d_ae, d_bs, d_bn, d_diag, buf.d_fromL, buf.d_fromR, buf.d_fromB, buf.d_fromT, nx, ny);
-	// cudaDeviceSynchronize();
+    dim3 block(BLOCK_X_2D, BLOCK_Y_2D);
+    dim3 grid(
+		(nx + BLOCK_X_2D - 1) / BLOCK_X_2D,
+        (ny + BLOCK_Y_2D - 1) / BLOCK_Y_2D
+	);
+
+    op_A_kernel<<<grid, block>>>(
+		d_in, d_out, d_aw, d_ae, d_bs, d_bn, d_diag,
+		buf.d_fromL, buf.d_fromR, buf.d_fromB, buf.d_fromT,
+		nx, ny
+	);
+    // cudaDeviceSynchronize();
 }
 
 void params_wr(double* d_w, const double* d_p, double* d_r, const double* d_Ap, double alpha, int n)
