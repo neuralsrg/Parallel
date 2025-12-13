@@ -142,7 +142,7 @@ void exchange_boundaries(const double* d_vec, int nx, int ny, ExchangeBuffer& bu
 {
 	int blocks = (std::max(nx,ny) + BLOCK_SZ - 1) / BLOCK_SZ;
 	pack_edges_kernel<<<blocks, BLOCK_SZ>>>(d_vec, nx, ny, buf.d_sendL, buf.d_sendR, buf.d_sendB, buf.d_sendT);
-	cudaDeviceSynchronize();
+	// cudaDeviceSynchronize();
 
 	cudaMemcpy(buf.sendL.data(), buf.d_sendL, ny * sizeof(double), cudaMemcpyDeviceToHost);
 	cudaMemcpy(buf.sendR.data(), buf.d_sendR, ny * sizeof(double), cudaMemcpyDeviceToHost);
@@ -171,38 +171,39 @@ void apply_A(
 	const double* d_diag,
 	const ExchangeBuffer& buf,
 	int nx,
-	int ny)
+	int ny
+)
 {
 	int n = nx * ny;
 	int blocks = (n + BLOCK_SZ - 1) / BLOCK_SZ;
 	op_A_kernel<<<blocks, BLOCK_SZ>>>(d_in, d_out, d_aw, d_ae, d_bs, d_bn, d_diag, buf.d_fromL, buf.d_fromR, buf.d_fromB, buf.d_fromT, nx, ny);
-	cudaDeviceSynchronize();
+	// cudaDeviceSynchronize();
 }
 
 void params_wr(double* d_w, const double* d_p, double* d_r, const double* d_Ap, double alpha, int n)
 {
 	int blocks = (n + BLOCK_SZ - 1) / BLOCK_SZ;
 	params_wr_kernel<<<blocks, BLOCK_SZ>>>(d_w, d_p, d_r, d_Ap, alpha, n);
-	cudaDeviceSynchronize();
+	// cudaDeviceSynchronize();
 }
 
 void param_p(double* d_p, const double* d_z, double beta, int n)
 {
 	int blocks = (n + BLOCK_SZ - 1) / BLOCK_SZ;
 	param_p_kernel<<<blocks, BLOCK_SZ>>>(d_p, d_z, beta, n);
-	cudaDeviceSynchronize();
+	// cudaDeviceSynchronize();
 }
 
 void div_vec(double* d_c, const double* d_a, const double* d_b, int n)
 {
 	int blocks = (n + BLOCK_SZ - 1) / BLOCK_SZ;
 	div_kernel<<<blocks, BLOCK_SZ>>>(d_c, d_a, d_b, n);
-	cudaDeviceSynchronize();
+	// cudaDeviceSynchronize();
 }
 
 void sub_vec(double* d_c, const double* d_a, const double* d_b, int n)
 {
 	int blocks = (n + BLOCK_SZ - 1) / BLOCK_SZ;
 	sub_kernel<<<blocks, BLOCK_SZ>>>(d_c, d_a, d_b, n);
-	cudaDeviceSynchronize();
+	// cudaDeviceSynchronize();
 }
