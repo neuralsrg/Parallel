@@ -4,8 +4,6 @@
 
 struct ExchangeBuffer
 {
-	std::vector<double> sendL, sendR, sendB, sendT;
-	std::vector<double> fromL, fromR, fromB, fromT;
 	double *d_sendL = nullptr, *d_sendR = nullptr, *d_sendB = nullptr, *d_sendT = nullptr;
 	double *d_fromL = nullptr, *d_fromR = nullptr, *d_fromB = nullptr, *d_fromT = nullptr;
 
