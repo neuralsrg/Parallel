@@ -75,10 +75,13 @@ std::vector<double> solver(
 		return std::sqrt(std::max(0.0, glob * (h1*h2)));
 	};
 
-	div_vec(d_z, d_r, d_diag, n);
-	cudaMemcpy(d_p, d_z, n*sizeof(double), cudaMemcpyDeviceToDevice);
+	double rz_loc = fused_div_vec(d_z, d_r, d_diag, n);
 
-	double rz = e_dot(d_r, d_z);
+	double rz = 0.0;
+	MPI_Allreduce(&rz_loc, &rz, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+	rz *= (h1 * h2);
+
+	cudaMemcpy(d_p, d_z, n * sizeof(double), cudaMemcpyDeviceToDevice);
 
 	ExchangeBuffer buf;
 	buf.allocate(nx, ny);
@@ -124,9 +127,11 @@ std::vector<double> solver(
 	double zr_prev = rz;
 
 	while (it < maxit) {
-		div_vec(d_z, d_r, d_diag, n);
+		double zr_loc = fused_div_vec(d_z, d_r, d_diag, n);
+		double zr_gl = 0.0;
+		MPI_Allreduce(&zr_loc, &zr_gl, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+		zr_gl *= (h1 * h2);
 
-		double zr_gl = e_dot(d_r, d_z);
 		double beta = (std::fabs(zr_prev) > 1e-300) ? (zr_gl / zr_prev) : 0.0;
 		zr_prev = zr_gl;
 
@@ -164,7 +169,12 @@ std::vector<double> solver(
 
 				apply_A(d_w, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
 				sub_vec(d_r, d_F, d_Ap, n);
-				div_vec(d_z, d_r, d_diag, n);
+
+				double rz3_loc = fused_div_vec(d_z, d_r, d_diag, n);
+				double rz3 = 0.0;
+				MPI_Allreduce(&rz3_loc, &rz3, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+				rz3 *= (h1 * h2);
+
 				cudaMemcpy(d_p, d_z, n * sizeof(double), cudaMemcpyDeviceToDevice);
 
 				double t_c3 = MPI_Wtime();
@@ -173,7 +183,6 @@ std::vector<double> solver(
 
 				apply_A(d_p, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
 
-				double rz3 = e_dot(d_r, d_z);
 				double denom3 = e_dot(d_Ap, d_p);
 				if (std::fabs(denom3) < 1e-300) break;
 

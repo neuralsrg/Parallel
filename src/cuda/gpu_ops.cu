@@ -6,6 +6,7 @@
 #include <thrust/functional.h>
 #include <thrust/transform_reduce.h>
 #include <thrust/iterator/zip_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
 
 #include "gpu_ops.hpp"
 
@@ -217,4 +218,36 @@ void sub_vec(double* d_c, const double* d_a, const double* d_b, int n)
 	int blocks = (n + BLOCK_SZ - 1) / BLOCK_SZ;
 	sub_kernel<<<blocks, BLOCK_SZ>>>(d_c, d_a, d_b, n);
 	// cudaDeviceSynchronize();
+}
+
+struct fused_div_vec_functor
+{
+	double* z;
+	const double* r;
+	const double* diag;
+
+	__host__ __device__ double operator()(const int& idx) const
+	{
+		double ri = r[idx];
+		double zi = ri / diag[idx];
+		z[idx] = zi;
+		return ri * zi;
+	}
+};
+
+double fused_div_vec(double* d_z, const double* d_r, const double* d_diag, int n)
+{
+	thrust::counting_iterator<int> first(0);
+	thrust::counting_iterator<int> last  = first + n;
+
+	fused_div_vec_functor f{d_z, d_r, d_diag};
+	double loc = thrust::transform_reduce(
+		first,
+		last,
+		f,
+		0.0,
+		thrust::plus<double>()
+	);
+
+	return loc;
 }

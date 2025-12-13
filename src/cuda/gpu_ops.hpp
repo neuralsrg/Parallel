@@ -37,6 +37,8 @@ void param_p(double* d_p, const double* d_z, double beta, int n);
 
 void div_vec(double* d_c, const double* d_a, const double* d_b, int n);
 
+double fused_div_vec(double* d_z, const double* d_r, const double* d_diag, int n);
+
 void sub_vec(double* d_c, const double* d_a, const double* d_b, int n);
 
 double dot_device(const double* u, const double* v, int n);
