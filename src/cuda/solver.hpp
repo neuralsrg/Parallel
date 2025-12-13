@@ -23,5 +23,6 @@ std::vector<double> solver(
 	int north,
 	double& t_init,
 	double& t_loop,
-	double& t_comm
+	double& t_comm,
+	bool control_H
 );

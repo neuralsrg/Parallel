@@ -17,7 +17,8 @@ std::vector<double> solver(
 	int nx, int ny, int M, int N,
 	double h1, double h2, double tol, int maxit,
 	int rank, int west, int east, int south, int north,
-	double& t_init, double& t_loop, double& t_comm
+	double& t_init, double& t_loop, double& t_comm,
+	bool control_H
 )
 {
 	t_init = 0.0; t_loop = 0.0; t_comm = 0.0;
@@ -112,7 +113,9 @@ std::vector<double> solver(
 		return w;
 	}
 
-	double H_prev = e_dot(d_F, d_w) + e_dot(d_r, d_w);
+	double H_prev;
+	if (control_H)
+		H_prev = e_dot(d_F, d_w) + e_dot(d_r, d_w);
 
 	t_init = MPI_Wtime() - t0;
 
@@ -148,42 +151,44 @@ std::vector<double> solver(
 			break;
 		}
 
-		double Hk = e_dot(d_F, d_w) + e_dot(d_r, d_w);
-		double tolH = 1e-12 * std::max(1.0, std::fabs(H_prev));
+		if (control_H) {
+			double Hk = e_dot(d_F, d_w) + e_dot(d_r, d_w);
+			double tolH = 1e-12 * std::max(1.0, std::fabs(H_prev));
 
-		if (Hk + tolH < H_prev && restarts < max_restarts) {
-			params_wr(d_w, d_p, d_r, d_Ap, -alpha2, n);
+			if (Hk + tolH < H_prev && restarts < max_restarts) {
+				params_wr(d_w, d_p, d_r, d_Ap, -alpha2, n);
 
-			double t_c2 = MPI_Wtime();
-			exchange_boundaries(d_w, nx, ny, buf, west, east, south, north);
-			t_comm += MPI_Wtime() - t_c2;
+				double t_c2 = MPI_Wtime();
+				exchange_boundaries(d_w, nx, ny, buf, west, east, south, north);
+				t_comm += MPI_Wtime() - t_c2;
 
-			apply_A(d_w, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
-			sub_vec(d_r, d_F, d_Ap, n);
-			div_vec(d_z, d_r, d_diag, n);
-			cudaMemcpy(d_p, d_z, n * sizeof(double), cudaMemcpyDeviceToDevice);
+				apply_A(d_w, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
+				sub_vec(d_r, d_F, d_Ap, n);
+				div_vec(d_z, d_r, d_diag, n);
+				cudaMemcpy(d_p, d_z, n * sizeof(double), cudaMemcpyDeviceToDevice);
 
-			double t_c3 = MPI_Wtime();
-			exchange_boundaries(d_p, nx, ny, buf, west, east, south, north);
-			t_comm += MPI_Wtime() - t_c3;
+				double t_c3 = MPI_Wtime();
+				exchange_boundaries(d_p, nx, ny, buf, west, east, south, north);
+				t_comm += MPI_Wtime() - t_c3;
 
-			apply_A(d_p, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
+				apply_A(d_p, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
 
-			double rz3 = e_dot(d_r, d_z);
-			double denom3 = e_dot(d_Ap, d_p);
-			if (std::fabs(denom3) < 1e-300) break;
+				double rz3 = e_dot(d_r, d_z);
+				double denom3 = e_dot(d_Ap, d_p);
+				if (std::fabs(denom3) < 1e-300) break;
 
-			double alpha3 = rz3/denom3;
-			params_wr(d_w, d_p, d_r, d_Ap, alpha3, n);
+				double alpha3 = rz3/denom3;
+				params_wr(d_w, d_p, d_r, d_Ap, alpha3, n);
 
-			H_prev = e_dot(d_F, d_w) + e_dot(d_r, d_w);
-			zr_prev = rz3;
+				H_prev = e_dot(d_F, d_w) + e_dot(d_r, d_w);
+				zr_prev = rz3;
 
-			restarts++;
-			++it;
-		continue;
-		} else {
-			H_prev = Hk;
+				restarts++;
+				++it;
+				continue;
+			} else {
+				H_prev = Hk;
+			}
 		}
 		++it;
 	}

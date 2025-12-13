@@ -254,7 +254,7 @@ int main(int argc, char** argv)
 		F, aw, ae, bs, bn, diag,
 		nx, ny, M, N, h1, h2, tol, maxit,
 		rank, west, east, south, north,
-		t_init, t_loop, t_comm
+		t_init, t_loop, t_comm, false
 	);
 
 	double loc = MPI_Wtime() - t0, glob = 0.0;
