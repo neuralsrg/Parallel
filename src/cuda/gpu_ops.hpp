@@ -33,15 +33,15 @@ void params_wr(
 	double* d_r,
 	const double* d_Ap,
 	double alpha,
-	int n
+	int nx, int ny
 );
 
-void param_p(double* d_p, const double* d_z, double beta, int n);
+void param_p(double* d_p, const double* d_z, double beta, int nx, int ny);
 
-void div_vec(double* d_c, const double* d_a, const double* d_b, int n);
+void div_vec(double* d_c, const double* d_a, const double* d_b, int nx, int ny);
 
 double fused_div_vec(double* d_z, const double* d_r, const double* d_diag, int n);
 
-void sub_vec(double* d_c, const double* d_a, const double* d_b, int n);
+void sub_vec(double* d_c, const double* d_a, const double* d_b, int nx, int ny);
 
 double dot_device(const double* u, const double* v, int n);

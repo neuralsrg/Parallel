@@ -114,7 +114,7 @@ std::vector<double> solver(
 	}
 	double alpha = rz / denom;
 
-	params_wr(d_w, d_p, d_r, d_Ap, alpha, n);
+	params_wr(d_w, d_p, d_r, d_Ap, alpha, nx, ny);
 
 	double delta_step = std::abs(alpha) * l2norm_p();
 	if (delta_step < tol) {
@@ -148,7 +148,7 @@ std::vector<double> solver(
 		double beta = (std::fabs(zr_prev) > 1e-300) ? (zr_gl / zr_prev) : 0.0;
 		zr_prev = zr_gl;
 
-		param_p(d_p, d_z, beta, n);
+		param_p(d_p, d_z, beta, nx, ny);
 		copy_interior_to_shadow(d_p, d_p_sh, nx, ny);
 
 		double t_c1 = MPI_Wtime();
@@ -162,7 +162,7 @@ std::vector<double> solver(
 			break;
 
 		double alpha2 = zr_gl / denom2;
-		params_wr(d_w, d_p, d_r, d_Ap, alpha2, n);
+		params_wr(d_w, d_p, d_r, d_Ap, alpha2, nx, ny);
 
 		double delta2 = std::abs(alpha2) * l2norm_p();
 		if (delta2 < tol) {
@@ -175,7 +175,7 @@ std::vector<double> solver(
 			double tolH = 1e-12 * std::max(1.0, std::fabs(H_prev));
 
 			if (Hk + tolH < H_prev && restarts < max_restarts) {
-				params_wr(d_w, d_p, d_r, d_Ap, -alpha2, n);
+				params_wr(d_w, d_p, d_r, d_Ap, -alpha2, nx, ny);
 				copy_interior_to_shadow(d_w, d_w_sh, nx, ny);
 
 				double t_c2 = MPI_Wtime();
@@ -183,7 +183,7 @@ std::vector<double> solver(
 				t_comm += MPI_Wtime() - t_c2;
 
 				apply_A(d_w_sh, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, nx, ny);
-				sub_vec(d_r, d_F, d_Ap, n);
+				sub_vec(d_r, d_F, d_Ap, nx, ny);
 
 				double rz3_loc = fused_div_vec(d_z, d_r, d_diag, n);
 				double rz3 = 0.0;
@@ -203,7 +203,7 @@ std::vector<double> solver(
 				if (std::fabs(denom3) < 1e-300) break;
 
 				double alpha3 = rz3/denom3;
-				params_wr(d_w, d_p, d_r, d_Ap, alpha3, n);
+				params_wr(d_w, d_p, d_r, d_Ap, alpha3, nx, ny);
 
 				H_prev = e_dot(d_F, d_w) + e_dot(d_r, d_w);
 				zr_prev = rz3;

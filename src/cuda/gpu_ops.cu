@@ -11,7 +11,6 @@
 #include "gpu_ops.hpp"
 
 
-static const int BLOCK_SZ = 256;
 static const int BLOCK_X_2D = 16;
 static const int BLOCK_Y_2D = 16;
 
@@ -25,17 +24,20 @@ __global__ void pack_edges_kernel(
 	double* __restrict__ sendT
 )
 {
-	int tid = blockDim.x * blockIdx.x + threadIdx.x;
-	int ld  = ny + 2;
-	if (tid < ny) {
-		int j = tid + 1;
-		sendL[tid] = v[ld + j];
-		sendR[tid] = v[nx * ld + j];
+	int j0 = blockIdx.x * blockDim.x + threadIdx.x;
+	int i0 = blockIdx.y * blockDim.y + threadIdx.y;
+	int ld = ny + 2;
+
+	if (i0 == 0 && j0 < ny) {
+		int j = j0 + 1;
+		sendL[j0] = v[ld + j];
+		sendR[j0] = v[nx * ld + j];
 	}
-	if (tid < nx) {
-		int i = tid + 1;
-		sendB[tid] = v[i * ld + 1];
-		sendT[tid] = v[i * ld + ny];
+
+	if (j0 == 0 && i0 < nx) {
+		int i = i0 + 1;
+		sendB[i0] = v[i * ld + 1];
+		sendT[i0] = v[i * ld + ny];
 	}
 }
 
@@ -88,35 +90,55 @@ __global__ void params_wr_kernel(
 	double* __restrict__ r,
 	const double* __restrict__ Ap,
 	double alpha,
-	int n
+	int nx,
+	int ny
 )
 {
-	int tid = blockDim.x * blockIdx.x + threadIdx.x;
-	if (tid < n){
-		w[tid] += alpha * p[tid];
-		r[tid] -= alpha * Ap[tid];
-	}
+	int j0 = blockIdx.x * blockDim.x + threadIdx.x;
+	int i0 = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (i0 >= nx || j0 >= ny)
+		return;
+
+	int idx = i0 * ny + j0;
+	w[idx] += alpha * p[idx];
+	r[idx] -= alpha * Ap[idx];
 }
 
-__global__ void param_p_kernel(double* __restrict__ p, const double* __restrict__ z, double beta, int n)
+__global__ void param_p_kernel(double* __restrict__ p, const double* __restrict__ z, double beta, int nx, int ny)
 {
-	int tid = blockDim.x * blockIdx.x + threadIdx.x;
-	if (tid < n)
-		p[tid] = z[tid] + beta*p[tid];
+	int j0 = blockIdx.x * blockDim.x + threadIdx.x;
+	int i0 = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (i0 >= nx || j0 >= ny)
+		return;
+
+	int idx = i0 * ny + j0;
+	p[idx] = z[idx] + beta * p[idx];
 }
 
-__global__ void div_kernel(double* __restrict__ c, const double* __restrict__ a, const double* __restrict__ b, int n)
+__global__ void div_kernel(double* __restrict__ c, const double* __restrict__ a, const double* __restrict__ b, int nx, int ny)
 {
-	int tid = blockDim.x * blockIdx.x + threadIdx.x;
-	if (tid < n)
-		c[tid] = a[tid] / b[tid];
+	int j0 = blockIdx.x * blockDim.x + threadIdx.x;
+	int i0 = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (i0 >= nx || j0 >= ny)
+		return;
+
+	int idx = i0 * ny + j0;
+	c[idx] = a[idx] / b[idx];
 }
 
-__global__ void sub_kernel(double* __restrict__ c, const double* __restrict__ a, const double* __restrict__ b, int n)
+__global__ void sub_kernel(double* __restrict__ c, const double* __restrict__ a, const double* __restrict__ b, int nx, int ny)
 {
-	int tid = blockDim.x * blockIdx.x + threadIdx.x;
-	if (tid < n)
-		c[tid] = a[tid] - b[tid];
+	int j0 = blockIdx.x * blockDim.x + threadIdx.x;
+	int i0 = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (i0 >= nx || j0 >= ny)
+		return;
+
+	int idx = i0 * ny + j0;
+	c[idx] = a[idx] - b[idx];
 }
 
 struct dot_unary
@@ -157,8 +179,17 @@ void exchange_boundaries(double* d_vec, int nx, int ny, ExchangeBuffer& buf, int
 	if (world_size == 1)
 		return;
 
-	int blocks = (std::max(nx,ny) + BLOCK_SZ - 1) / BLOCK_SZ;
-	pack_edges_kernel<<<blocks, BLOCK_SZ>>>(d_vec, nx, ny, buf.d_sendL, buf.d_sendR, buf.d_sendB, buf.d_sendT);
+	dim3 block(BLOCK_X_2D, BLOCK_Y_2D);
+	dim3 grid(
+		(ny + BLOCK_X_2D - 1) / BLOCK_X_2D,
+		(nx + BLOCK_Y_2D - 1) / BLOCK_Y_2D
+	);
+
+	pack_edges_kernel<<<grid, block>>>(
+		d_vec, nx, ny,
+		buf.d_sendL, buf.d_sendR,
+		buf.d_sendB, buf.d_sendT
+	);
 	cudaDeviceSynchronize();
 
 	cudaMemcpy(buf.sendL.data(), buf.d_sendL, ny * sizeof(double), cudaMemcpyDeviceToHost);
@@ -229,31 +260,51 @@ void apply_A(
 	// cudaDeviceSynchronize();
 }
 
-void params_wr(double* d_w, const double* d_p, double* d_r, const double* d_Ap, double alpha, int n)
+void params_wr(double* d_w, const double* d_p, double* d_r, const double* d_Ap, double alpha, int nx, int ny)
 {
-	int blocks = (n + BLOCK_SZ - 1) / BLOCK_SZ;
-	params_wr_kernel<<<blocks, BLOCK_SZ>>>(d_w, d_p, d_r, d_Ap, alpha, n);
+	dim3 block(BLOCK_X_2D, BLOCK_Y_2D);
+	dim3 grid(
+		(ny + BLOCK_X_2D - 1) / BLOCK_X_2D,
+		(nx + BLOCK_Y_2D - 1) / BLOCK_Y_2D
+	);
+
+	params_wr_kernel<<<grid, block>>>(d_w, d_p, d_r, d_Ap, alpha, nx, ny);
 	// cudaDeviceSynchronize();
 }
 
-void param_p(double* d_p, const double* d_z, double beta, int n)
+void param_p(double* d_p, const double* d_z, double beta, int nx, int ny)
 {
-	int blocks = (n + BLOCK_SZ - 1) / BLOCK_SZ;
-	param_p_kernel<<<blocks, BLOCK_SZ>>>(d_p, d_z, beta, n);
+	dim3 block(BLOCK_X_2D, BLOCK_Y_2D);
+	dim3 grid(
+		(ny + BLOCK_X_2D - 1) / BLOCK_X_2D,
+		(nx + BLOCK_Y_2D - 1) / BLOCK_Y_2D
+	);
+
+	param_p_kernel<<<grid, block>>>(d_p, d_z, beta, nx, ny);
 	// cudaDeviceSynchronize();
 }
 
-void div_vec(double* d_c, const double* d_a, const double* d_b, int n)
+void div_vec(double* d_c, const double* d_a, const double* d_b, int nx, int ny)
 {
-	int blocks = (n + BLOCK_SZ - 1) / BLOCK_SZ;
-	div_kernel<<<blocks, BLOCK_SZ>>>(d_c, d_a, d_b, n);
+	dim3 block(BLOCK_X_2D, BLOCK_Y_2D);
+	dim3 grid(
+		(ny + BLOCK_X_2D - 1) / BLOCK_X_2D,
+		(nx + BLOCK_Y_2D - 1) / BLOCK_Y_2D
+	);
+
+	div_kernel<<<grid, block>>>(d_c, d_a, d_b, nx, ny);
 	// cudaDeviceSynchronize();
 }
 
-void sub_vec(double* d_c, const double* d_a, const double* d_b, int n)
+void sub_vec(double* d_c, const double* d_a, const double* d_b, int nx, int ny)
 {
-	int blocks = (n + BLOCK_SZ - 1) / BLOCK_SZ;
-	sub_kernel<<<blocks, BLOCK_SZ>>>(d_c, d_a, d_b, n);
+	dim3 block(BLOCK_X_2D, BLOCK_Y_2D);
+	dim3 grid(
+		(ny + BLOCK_X_2D - 1) / BLOCK_X_2D,
+		(nx + BLOCK_Y_2D - 1) / BLOCK_Y_2D
+	);
+
+	sub_kernel<<<grid, block>>>(d_c, d_a, d_b, nx, ny);
 	// cudaDeviceSynchronize();
 }
 
