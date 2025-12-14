@@ -156,14 +156,12 @@ double dot_device(const double* u, const double* v, int n)
 
 void ExchangeBuffer::allocate(int nx, int ny)
 {
-	cudaMalloc(&d_sendL, ny * sizeof(double));
-	cudaMalloc(&d_sendR, ny * sizeof(double));
-	cudaMalloc(&d_sendB, nx * sizeof(double));
-	cudaMalloc(&d_sendT, nx * sizeof(double));
-	cudaMalloc(&d_fromL, ny * sizeof(double));
-	cudaMalloc(&d_fromR, ny * sizeof(double));
-	cudaMalloc(&d_fromB, nx * sizeof(double));
-	cudaMalloc(&d_fromT, nx * sizeof(double));
+	sendL.resize(ny); sendR.resize(ny); sendB.resize(nx); sendT.resize(nx);
+	fromL.resize(ny); fromR.resize(ny); fromB.resize(nx); fromT.resize(nx);
+	cudaMalloc(&d_sendL, ny * sizeof(double)); cudaMalloc(&d_sendR, ny * sizeof(double));
+	cudaMalloc(&d_sendB, nx * sizeof(double)); cudaMalloc(&d_sendT, nx * sizeof(double));
+	cudaMalloc(&d_fromL, ny * sizeof(double)); cudaMalloc(&d_fromR, ny * sizeof(double));
+	cudaMalloc(&d_fromB, nx * sizeof(double)); cudaMalloc(&d_fromT, nx * sizeof(double));
 }
 
 void ExchangeBuffer::release()
@@ -174,36 +172,30 @@ void ExchangeBuffer::release()
 	d_fromL = d_fromR = d_fromB = d_fromT = nullptr;
 }
 
-void exchange_boundaries(const double* d_vec, int nx, int ny, ExchangeBuffer& buf, int west, int east, int south, int north)
+void exchange_boundaries(const double* d_vec, int nx, int ny, ExchangeBuffer& buf, int west, int east, int south, int north,  int world_size)
 {
+	if (world_size == 1)
+		return;
+
 	int blocks = (std::max(nx,ny) + BLOCK_SZ - 1) / BLOCK_SZ;
 	pack_edges_kernel<<<blocks, BLOCK_SZ>>>(d_vec, nx, ny, buf.d_sendL, buf.d_sendR, buf.d_sendB, buf.d_sendT);
 	cudaDeviceSynchronize();
 
+	cudaMemcpy(buf.sendL.data(), buf.d_sendL, ny * sizeof(double), cudaMemcpyDeviceToHost);
+	cudaMemcpy(buf.sendR.data(), buf.d_sendR, ny * sizeof(double), cudaMemcpyDeviceToHost);
+	cudaMemcpy(buf.sendB.data(), buf.d_sendB, nx * sizeof(double), cudaMemcpyDeviceToHost);
+	cudaMemcpy(buf.sendT.data(), buf.d_sendT, nx * sizeof(double), cudaMemcpyDeviceToHost);
+
 	MPI_Status st;
-	MPI_Sendrecv(
-		buf.d_sendL, ny, MPI_DOUBLE, west,  101,
-		buf.d_fromR, ny, MPI_DOUBLE, east,  101,
-		MPI_COMM_WORLD, &st
-	);
+	MPI_Sendrecv(buf.sendL.data(), ny, MPI_DOUBLE, west, 101, buf.fromR.data(), ny, MPI_DOUBLE, east, 101, MPI_COMM_WORLD, &st);
+	MPI_Sendrecv(buf.sendR.data(), ny, MPI_DOUBLE, east, 102, buf.fromL.data(), ny, MPI_DOUBLE, west, 102, MPI_COMM_WORLD, &st);
+	MPI_Sendrecv(buf.sendB.data(), nx, MPI_DOUBLE, south, 201, buf.fromT.data(), nx, MPI_DOUBLE, north, 201, MPI_COMM_WORLD, &st);
+	MPI_Sendrecv(buf.sendT.data(), nx, MPI_DOUBLE, north, 202, buf.fromB.data(), nx, MPI_DOUBLE, south, 202, MPI_COMM_WORLD, &st);
 
-	MPI_Sendrecv(
-		buf.d_sendR, ny, MPI_DOUBLE, east,  102,
-		buf.d_fromL, ny, MPI_DOUBLE, west,  102,
-		MPI_COMM_WORLD, &st
-	);
-
-	MPI_Sendrecv(
-		buf.d_sendB, nx, MPI_DOUBLE, south, 201,
-		buf.d_fromT, nx, MPI_DOUBLE, north, 201,
-		MPI_COMM_WORLD, &st
-	);
-
-	MPI_Sendrecv(
-		buf.d_sendT, nx, MPI_DOUBLE, north, 202,
-		buf.d_fromB, nx, MPI_DOUBLE, south, 202,
-		MPI_COMM_WORLD, &st
-	);
+	cudaMemcpy(buf.d_fromL, buf.fromL.data(), ny * sizeof(double), cudaMemcpyHostToDevice);
+	cudaMemcpy(buf.d_fromR, buf.fromR.data(), ny * sizeof(double), cudaMemcpyHostToDevice);
+	cudaMemcpy(buf.d_fromB, buf.fromB.data(), nx * sizeof(double), cudaMemcpyHostToDevice);
+	cudaMemcpy(buf.d_fromT, buf.fromT.data(), nx * sizeof(double), cudaMemcpyHostToDevice);
 }
 
 void apply_A(
@@ -219,18 +211,18 @@ void apply_A(
 	int ny
 )
 {
-    dim3 block(BLOCK_X_2D, BLOCK_Y_2D);
-    dim3 grid(
-		(nx + BLOCK_X_2D - 1) / BLOCK_X_2D,
-        (ny + BLOCK_Y_2D - 1) / BLOCK_Y_2D
+	dim3 block(BLOCK_X_2D, BLOCK_Y_2D);
+	dim3 grid(
+		(ny + BLOCK_X_2D - 1) / BLOCK_X_2D,
+		(nx + BLOCK_Y_2D - 1) / BLOCK_Y_2D
 	);
 
-    op_A_kernel<<<grid, block>>>(
+	op_A_kernel<<<grid, block>>>(
 		d_in, d_out, d_aw, d_ae, d_bs, d_bn, d_diag,
 		buf.d_fromL, buf.d_fromR, buf.d_fromB, buf.d_fromT,
 		nx, ny
 	);
-    // cudaDeviceSynchronize();
+	// cudaDeviceSynchronize();
 }
 
 void params_wr(double* d_w, const double* d_p, double* d_r, const double* d_Ap, double alpha, int n)

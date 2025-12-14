@@ -4,6 +4,8 @@
 
 struct ExchangeBuffer
 {
+	std::vector<double> sendL, sendR, sendB, sendT;
+	std::vector<double> fromL, fromR, fromB, fromT;
 	double *d_sendL = nullptr, *d_sendR = nullptr, *d_sendB = nullptr, *d_sendT = nullptr;
 	double *d_fromL = nullptr, *d_fromR = nullptr, *d_fromB = nullptr, *d_fromT = nullptr;
 
@@ -13,7 +15,7 @@ struct ExchangeBuffer
 
 void exchange_boundaries(
 	const double* d_vec, int nx, int ny, ExchangeBuffer& buf,
-	int west, int east, int south, int north
+	int west, int east, int south, int north, int world_size
 );
 
 void apply_A(

@@ -21,6 +21,8 @@ std::vector<double> solver(
 	bool control_H
 )
 {
+	int size;
+	MPI_Comm_size(MPI_COMM_WORLD, &size);
 	t_init = 0.0; t_loop = 0.0; t_comm = 0.0;
 	const int n = nx*ny;
 
@@ -87,7 +89,7 @@ std::vector<double> solver(
 	buf.allocate(nx, ny);
 
 	double t_c0 = MPI_Wtime();
-	exchange_boundaries(d_p, nx, ny, buf, west, east, south, north);
+	exchange_boundaries(d_p, nx, ny, buf, west, east, south, north, size);
 	t_comm += MPI_Wtime() - t_c0;
 
 	apply_A(d_p, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
@@ -138,7 +140,7 @@ std::vector<double> solver(
 		param_p(d_p, d_z, beta, n);
 
 		double t_c1 = MPI_Wtime();
-		exchange_boundaries(d_p, nx, ny, buf, west, east, south, north);
+		exchange_boundaries(d_p, nx, ny, buf, west, east, south, north, size);
 		t_comm += MPI_Wtime() - t_c1;
 
 		apply_A(d_p, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
@@ -164,7 +166,7 @@ std::vector<double> solver(
 				params_wr(d_w, d_p, d_r, d_Ap, -alpha2, n);
 
 				double t_c2 = MPI_Wtime();
-				exchange_boundaries(d_w, nx, ny, buf, west, east, south, north);
+				exchange_boundaries(d_w, nx, ny, buf, west, east, south, north, size);
 				t_comm += MPI_Wtime() - t_c2;
 
 				apply_A(d_w, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
@@ -178,7 +180,7 @@ std::vector<double> solver(
 				cudaMemcpy(d_p, d_z, n * sizeof(double), cudaMemcpyDeviceToDevice);
 
 				double t_c3 = MPI_Wtime();
-				exchange_boundaries(d_p, nx, ny, buf, west, east, south, north);
+				exchange_boundaries(d_p, nx, ny, buf, west, east, south, north, size);
 				t_comm += MPI_Wtime() - t_c3;
 
 				apply_A(d_p, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
