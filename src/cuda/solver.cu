@@ -56,6 +56,7 @@ std::vector<double> solver(
 	cudaMalloc(&d_diag, n * sizeof(double));
 	cudaMalloc(&d_F, n * sizeof(double));
 
+	double t_c0 = MPI_Wtime();
 	cudaMemcpy(d_aw, aw_h.data(), n * sizeof(double), cudaMemcpyHostToDevice);
 	cudaMemcpy(d_ae, ae_h.data(), n * sizeof(double), cudaMemcpyHostToDevice);
 	cudaMemcpy(d_bs, bs_h.data(), n * sizeof(double), cudaMemcpyHostToDevice);
@@ -64,6 +65,7 @@ std::vector<double> solver(
 	cudaMemcpy(d_F, F_h.data(), n * sizeof(double), cudaMemcpyHostToDevice);
 	cudaMemset(d_w, 0, n * sizeof(double));
 	cudaMemcpy(d_r, d_F, n * sizeof(double), cudaMemcpyDeviceToDevice);
+	t_comm += MPI_Wtime() - t_c0;
 
 	auto dev_dot = [&](const double* a, const double* b)
 	{
@@ -87,17 +89,21 @@ std::vector<double> solver(
 	double rz_loc = fused_div_vec(d_z, d_r, d_diag, n);
 
 	double rz = 0.0;
+	t_c0 = MPI_Wtime();
 	MPI_Allreduce(&rz_loc, &rz, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+	t_comm += MPI_Wtime() - t_c0;
 	rz *= (h1 * h2);
 
+	t_c0 = MPI_Wtime();
 	cudaMemcpy(d_p, d_z, n * sizeof(double), cudaMemcpyDeviceToDevice);
+	t_comm += MPI_Wtime() - t_c0;
 
 	ExchangeBuffer buf;
 	buf.allocate(nx, ny);
 
 	copy_interior_to_shadow(d_p, d_p_sh, nx, ny);
 
-	double t_c0 = MPI_Wtime();
+	t_c0 = MPI_Wtime();
 	exchange_boundaries(d_p_sh, nx, ny, buf, west, east, south, north, size);
 	t_comm += MPI_Wtime() - t_c0;
 
@@ -220,7 +226,9 @@ std::vector<double> solver(
 	t_loop = MPI_Wtime() - t_loop0;
 
 	std::vector<double> w(n, 0.0);
+	t_c0 = MPI_Wtime();
 	cudaMemcpy(w.data(), d_w, n*sizeof(double), cudaMemcpyDeviceToHost);
+	t_comm += MPI_Wtime() - t_c0;
 
 	buf.release();
 	cudaFree(d_w); cudaFree(d_r); cudaFree(d_z); cudaFree(d_p); cudaFree(d_Ap);
