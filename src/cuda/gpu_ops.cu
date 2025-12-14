@@ -26,13 +26,16 @@ __global__ void pack_edges_kernel(
 )
 {
 	int tid = blockDim.x * blockIdx.x + threadIdx.x;
+	int ld  = ny + 2;
 	if (tid < ny) {
-		sendL[tid] = v[tid];
-		sendR[tid] = v[(nx - 1) * ny + tid];
+		int j = tid + 1;
+		sendL[tid] = v[ld + j];
+		sendR[tid] = v[nx * ld + j];
 	}
 	if (tid < nx) {
-		sendB[tid] = v[tid * ny];
-		sendT[tid] = v[tid * ny + (ny - 1)];
+		int i = tid + 1;
+		sendB[tid] = v[i * ld + 1];
+		sendT[tid] = v[i * ld + ny];
 	}
 }
 
@@ -44,10 +47,6 @@ __global__ void op_A_kernel(
 	const double* __restrict__ bs,
 	const double* __restrict__ bn,
 	const double* __restrict__ diag,
-	const double* __restrict__ fromL,
-	const double* __restrict__ fromR,
-	const double* __restrict__ fromB,
-	const double* __restrict__ fromT,
 	int nx,
 	int ny
 )
@@ -58,42 +57,23 @@ __global__ void op_A_kernel(
 	if (i0 >= nx || j0 >= ny)
 		return;
 
+	int ld = ny + 2;
+	int I = i0 + 1;
+	int J = j0 + 1;
+
 	int tid = i0 * ny + j0;
 
-	double wij = w[tid];
+	double wij = w[I * ld + J];
+	double wi1j = w[(I + 1) * ld + J];
+	double wi_1j = w[(I - 1) * ld + J];
+	double wij1 = w[I * ld + (J + 1)];
+	double wij_1 = w[I * ld + (J - 1)];
+
 	double awij = aw[tid];
 	double aeij = ae[tid];
 	double bsij = bs[tid];
 	double bnij = bn[tid];
 	double dij = diag[tid];
-
-	double wi1j;
-	if (i0 + 1 < nx) {
-		wi1j = w[(i0 + 1) * ny + j0];
-	} else {
-		wi1j = fromR[j0];
-	}
-
-	double wi_1j;
-	if (i0 > 0) {
-		wi_1j = w[(i0 - 1) * ny + j0];
-	} else {
-		wi_1j = fromL[j0];
-	}
-
-	double wij1;
-	if (j0 + 1 < ny) {
-		wij1 = w[i0 * ny + (j0 + 1)];
-	} else {
-		wij1 = fromT[i0];
-	}
-
-	double wij_1;
-	if (j0 > 0) {
-		wij_1 = w[i0 * ny + (j0 - 1)];
-	} else {
-		wij_1 = fromB[i0];
-	}
 
 	Aw[tid] = dij * wij
 		- aeij * wi1j
@@ -172,7 +152,7 @@ void ExchangeBuffer::release()
 	d_fromL = d_fromR = d_fromB = d_fromT = nullptr;
 }
 
-void exchange_boundaries(const double* d_vec, int nx, int ny, ExchangeBuffer& buf, int west, int east, int south, int north,  int world_size)
+void exchange_boundaries(double* d_vec, int nx, int ny, ExchangeBuffer& buf, int west, int east, int south, int north, int world_size)
 {
 	if (world_size == 1)
 		return;
@@ -196,6 +176,32 @@ void exchange_boundaries(const double* d_vec, int nx, int ny, ExchangeBuffer& bu
 	cudaMemcpy(buf.d_fromR, buf.fromR.data(), ny * sizeof(double), cudaMemcpyHostToDevice);
 	cudaMemcpy(buf.d_fromB, buf.fromB.data(), nx * sizeof(double), cudaMemcpyHostToDevice);
 	cudaMemcpy(buf.d_fromT, buf.fromT.data(), nx * sizeof(double), cudaMemcpyHostToDevice);
+
+	size_t ld = static_cast<size_t>(ny + 2);
+
+	cudaMemcpy(d_vec + 0 * ld + 1, buf.d_fromL, ny * sizeof(double), cudaMemcpyDeviceToDevice);
+	cudaMemcpy(d_vec + (nx + 1) * ld + 1, buf.d_fromR, ny * sizeof(double), cudaMemcpyDeviceToDevice);
+
+	size_t width  = sizeof(double);
+	size_t height = static_cast<size_t>(nx);
+	size_t dst = ld * sizeof(double);
+	size_t src = sizeof(double);
+
+	cudaMemcpy2D(d_vec + 1 * ld + 0, dst, buf.d_fromB, src, width, height, cudaMemcpyDeviceToDevice);
+	cudaMemcpy2D(d_vec + 1 * ld + (ny + 1), dst, buf.d_fromT, src, width, height, cudaMemcpyDeviceToDevice);
+}
+
+void copy_interior_to_shadow(const double* d_interior, double* d_shadow, int nx, int ny)
+{
+	size_t ld_shadow = static_cast<size_t>(ny + 2);
+	size_t src = static_cast<size_t>(ny) * sizeof(double);
+	double* dst = d_shadow + 1 * ld_shadow + 1;
+	size_t dstOff = ld_shadow * sizeof(double);
+
+	size_t width  = static_cast<size_t>(ny) * sizeof(double);
+	size_t height = static_cast<size_t>(nx);
+
+	cudaMemcpy2D(dst, dstOff, d_interior, src, width, height, cudaMemcpyDeviceToDevice);
 }
 
 void apply_A(
@@ -206,7 +212,6 @@ void apply_A(
 	const double* d_bs,
 	const double* d_bn,
 	const double* d_diag,
-	const ExchangeBuffer& buf,
 	int nx,
 	int ny
 )
@@ -219,7 +224,6 @@ void apply_A(
 
 	op_A_kernel<<<grid, block>>>(
 		d_in, d_out, d_aw, d_ae, d_bs, d_bn, d_diag,
-		buf.d_fromL, buf.d_fromR, buf.d_fromB, buf.d_fromT,
 		nx, ny
 	);
 	// cudaDeviceSynchronize();

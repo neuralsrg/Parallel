@@ -14,16 +14,17 @@ struct ExchangeBuffer
 };
 
 void exchange_boundaries(
-	const double* d_vec, int nx, int ny, ExchangeBuffer& buf,
-	int west, int east, int south, int north, int world_size
+	double* d_vec, int nx, int ny, ExchangeBuffer& buf, int west, int east, int south, int north, int world_size
 );
+
+void copy_interior_to_shadow(const double* d_interior, double* d_shadow, int nx, int ny);
 
 void apply_A(
 	const double* d_in, double* d_out,
 	const double* d_aw, const double* d_ae,
 	const double* d_bs, const double* d_bn,
 	const double* d_diag,
-	const ExchangeBuffer& buf, int nx, int ny
+	int nx, int ny
 );
 
 void params_wr(

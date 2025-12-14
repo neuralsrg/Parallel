@@ -25,6 +25,7 @@ std::vector<double> solver(
 	MPI_Comm_size(MPI_COMM_WORLD, &size);
 	t_init = 0.0; t_loop = 0.0; t_comm = 0.0;
 	const int n = nx*ny;
+	const int ns = (nx + 2) * (ny + 2);
 
 	int dc = 0;
 	if (cudaGetDeviceCount(&dc) != cudaSuccess)
@@ -35,12 +36,18 @@ std::vector<double> solver(
 	double t0 = MPI_Wtime();
 	double *d_w = nullptr, *d_r = nullptr, *d_z = nullptr, *d_p = nullptr, *d_Ap = nullptr;
 	double *d_aw = nullptr, *d_ae = nullptr, *d_bs = nullptr, *d_bn = nullptr, *d_diag = nullptr, *d_F = nullptr;
+	double *d_w_sh = nullptr, *d_p_sh = nullptr;
 
 	cudaMalloc(&d_w, n * sizeof(double));
 	cudaMalloc(&d_r, n * sizeof(double));
 	cudaMalloc(&d_z, n * sizeof(double));
 	cudaMalloc(&d_p, n * sizeof(double));
 	cudaMalloc(&d_Ap, n * sizeof(double));
+
+	cudaMalloc(&d_w_sh, ns * sizeof(double));
+	cudaMalloc(&d_p_sh, ns * sizeof(double));
+	cudaMemset(d_w_sh, 0, ns * sizeof(double));
+	cudaMemset(d_p_sh, 0, ns * sizeof(double));
 
 	cudaMalloc(&d_aw, n * sizeof(double));
 	cudaMalloc(&d_ae, n * sizeof(double));
@@ -88,16 +95,19 @@ std::vector<double> solver(
 	ExchangeBuffer buf;
 	buf.allocate(nx, ny);
 
+	copy_interior_to_shadow(d_p, d_p_sh, nx, ny);
+
 	double t_c0 = MPI_Wtime();
-	exchange_boundaries(d_p, nx, ny, buf, west, east, south, north, size);
+	exchange_boundaries(d_p_sh, nx, ny, buf, west, east, south, north, size);
 	t_comm += MPI_Wtime() - t_c0;
 
-	apply_A(d_p, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
+	apply_A(d_p_sh, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, nx, ny);
 
 	double denom = e_dot(d_Ap, d_p);
 	if (std::fabs(denom) < 1e-300) {
 		std::vector<double> w(n, 0.0);
 		cudaFree(d_w); cudaFree(d_r); cudaFree(d_z); cudaFree(d_p); cudaFree(d_Ap);
+		cudaFree(d_w_sh); cudaFree(d_p_sh);
 		cudaFree(d_aw); cudaFree(d_ae); cudaFree(d_bs); cudaFree(d_bn); cudaFree(d_diag); cudaFree(d_F);
 		buf.release();
 		return w;
@@ -114,6 +124,7 @@ std::vector<double> solver(
 		t_loop = 0.0;
 		buf.release();
 		cudaFree(d_w); cudaFree(d_r); cudaFree(d_z); cudaFree(d_p); cudaFree(d_Ap);
+		cudaFree(d_w_sh); cudaFree(d_p_sh);
 		cudaFree(d_aw); cudaFree(d_ae); cudaFree(d_bs); cudaFree(d_bn); cudaFree(d_diag); cudaFree(d_F);
 		return w;
 	}
@@ -138,12 +149,13 @@ std::vector<double> solver(
 		zr_prev = zr_gl;
 
 		param_p(d_p, d_z, beta, n);
+		copy_interior_to_shadow(d_p, d_p_sh, nx, ny);
 
 		double t_c1 = MPI_Wtime();
-		exchange_boundaries(d_p, nx, ny, buf, west, east, south, north, size);
+		exchange_boundaries(d_p_sh, nx, ny, buf, west, east, south, north, size);
 		t_comm += MPI_Wtime() - t_c1;
 
-		apply_A(d_p, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
+		apply_A(d_p_sh, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, nx, ny);
 
 		double denom2 = e_dot(d_Ap, d_p);
 		if (std::fabs(denom2) < 1e-300)
@@ -164,12 +176,13 @@ std::vector<double> solver(
 
 			if (Hk + tolH < H_prev && restarts < max_restarts) {
 				params_wr(d_w, d_p, d_r, d_Ap, -alpha2, n);
+				copy_interior_to_shadow(d_w, d_w_sh, nx, ny);
 
 				double t_c2 = MPI_Wtime();
-				exchange_boundaries(d_w, nx, ny, buf, west, east, south, north, size);
+				exchange_boundaries(d_w_sh, nx, ny, buf, west, east, south, north, size);
 				t_comm += MPI_Wtime() - t_c2;
 
-				apply_A(d_w, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
+				apply_A(d_w_sh, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, nx, ny);
 				sub_vec(d_r, d_F, d_Ap, n);
 
 				double rz3_loc = fused_div_vec(d_z, d_r, d_diag, n);
@@ -178,12 +191,13 @@ std::vector<double> solver(
 				rz3 *= (h1 * h2);
 
 				cudaMemcpy(d_p, d_z, n * sizeof(double), cudaMemcpyDeviceToDevice);
+				copy_interior_to_shadow(d_p, d_p_sh, nx, ny);
 
 				double t_c3 = MPI_Wtime();
-				exchange_boundaries(d_p, nx, ny, buf, west, east, south, north, size);
+				exchange_boundaries(d_p_sh, nx, ny, buf, west, east, south, north, size);
 				t_comm += MPI_Wtime() - t_c3;
 
-				apply_A(d_p, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, buf, nx, ny);
+				apply_A(d_p_sh, d_Ap, d_aw, d_ae, d_bs, d_bn, d_diag, nx, ny);
 
 				double denom3 = e_dot(d_Ap, d_p);
 				if (std::fabs(denom3) < 1e-300) break;
@@ -210,6 +224,7 @@ std::vector<double> solver(
 
 	buf.release();
 	cudaFree(d_w); cudaFree(d_r); cudaFree(d_z); cudaFree(d_p); cudaFree(d_Ap);
+	cudaFree(d_w_sh); cudaFree(d_p_sh);
 	cudaFree(d_aw); cudaFree(d_ae); cudaFree(d_bs); cudaFree(d_bn); cudaFree(d_diag); cudaFree(d_F);
 
 	if (rank == 0) {
